@@ -7,11 +7,15 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "@databricks/sql": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "helmet": "^6.0.0"
   }
 }

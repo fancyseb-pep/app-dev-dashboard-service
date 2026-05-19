@@ -7,12 +7,6 @@ import {
   OPERATIONS_TAB_PROBLEMS_TABLE,
 } from "../constants/TableNames.js";
 import {
-  getLatamIncidents,
-  getLatamAlerts,
-  getLatamProblems,
-  clearLatamCache,
-} from "../services/latamExcel.js";
-import {
   getNextRefreshTime,
   getScheduleSummary,
 } from "../utils/cacheSchedule.js";
@@ -119,33 +113,27 @@ function buildInClause(values) {
 
 const MONTHS_12 = generateLastNMonthLabels(12);
 
+// ── Cache-Control headers ─────────────────────────────────────────────────────
+function setCacheHeaders(res, expiresAt) {
+  // Compute remaining TTL and surface Cache-Control + X-Cache-Expires
+  const ms = expiresAt.getTime() - Date.now();
+  const secs = Math.max(0, Math.floor(ms / 1000));
+  res.setHeader("Cache-Control", `public, max-age=${secs}`);
+  res.setHeader("X-Cache-Expires", expiresAt.toISOString());
+}
+
 // ── GET /api/operations/incidents ─────────────────────────────────────────────
 router.get("/incidents", async (req, res, next) => {
   try {
     const { sector, grpNames, error } = resolveGrpNames(req.query.sector);
     if (error) return res.status(400).json({ error });
 
-    // LATAM → Excel
-    if (sector === "LATAM") {
-      try {
-        res.set("X-Cache", "LATAM-EXCEL");
-        return res.json(getLatamIncidents());
-      } catch (e) {
-        return res
-          .status(500)
-          .json({ error: `LATAM Excel error: ${e.message}` });
-      }
-    }
-
-    // Non-LATAM → Databricks (schedule-aligned cache)
+    // Non-LATAM and LATAM → Databricks (schedule-aligned cache)
     const cacheKey = `incidents:${sector}`;
     const cached = dbCacheGet(cacheKey);
     if (cached) {
-      res.set("X-Cache", "HIT");
-      res.set(
-        "X-Cache-Expires",
-        _dbCache.get(cacheKey).expiresAt.toISOString(),
-      );
+      setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
+      res.setHeader("X-Cache", "HIT");
       return res.json(cached);
     }
 
@@ -164,7 +152,7 @@ router.get("/incidents", async (req, res, next) => {
       GROUP BY 1, 2
       ORDER BY 1, 2
     `;
-
+console.log(">>>> incidents sql", sql)
     const rows = await queryDatabricks(sql);
     const countMap = {};
     for (const row of rows) {
@@ -179,9 +167,10 @@ router.get("/incidents", async (req, res, next) => {
 
     const payload = { months: MONTHS_12, incidents };
     dbCacheSet(cacheKey, payload);
-    res.set("X-Cache", "MISS");
-    res.set("X-Cache-Expires", _dbCache.get(cacheKey).expiresAt.toISOString());
+    setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
+    res.setHeader("X-Cache", "MISS");
     res.json(payload);
+    return;
   } catch (err) {
     next(err);
   }
@@ -193,25 +182,11 @@ router.get("/problems", async (req, res, next) => {
     const { sector, grpNames, error } = resolveGrpNames(req.query.sector);
     if (error) return res.status(400).json({ error });
 
-    if (sector === "LATAM") {
-      try {
-        res.set("X-Cache", "LATAM-EXCEL");
-        return res.json(getLatamProblems());
-      } catch (e) {
-        return res
-          .status(500)
-          .json({ error: `LATAM Excel error: ${e.message}` });
-      }
-    }
-
     const cacheKey = `problems:${sector}`;
     const cached = dbCacheGet(cacheKey);
     if (cached) {
-      res.set("X-Cache", "HIT");
-      res.set(
-        "X-Cache-Expires",
-        _dbCache.get(cacheKey).expiresAt.toISOString(),
-      );
+      setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
+      res.setHeader("X-Cache", "HIT");
       return res.json(cached);
     }
 
@@ -246,9 +221,10 @@ router.get("/problems", async (req, res, next) => {
 
     const payload = { months: MONTHS_12, problems };
     dbCacheSet(cacheKey, payload);
-    res.set("X-Cache", "MISS");
-    res.set("X-Cache-Expires", _dbCache.get(cacheKey).expiresAt.toISOString());
+    setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
+    res.setHeader("X-Cache", "MISS");
     res.json(payload);
+    return;
   } catch (err) {
     next(err);
   }
@@ -260,25 +236,11 @@ router.get("/alerts", async (req, res, next) => {
     const { sector, grpNames, error } = resolveGrpNames(req.query.sector);
     if (error) return res.status(400).json({ error });
 
-    if (sector === "LATAM") {
-      try {
-        res.set("X-Cache", "LATAM-EXCEL");
-        return res.json(getLatamAlerts());
-      } catch (e) {
-        return res
-          .status(500)
-          .json({ error: `LATAM Excel error: ${e.message}` });
-      }
-    }
-
     const cacheKey = `alerts:${sector}`;
     const cached = dbCacheGet(cacheKey);
     if (cached) {
-      res.set("X-Cache", "HIT");
-      res.set(
-        "X-Cache-Expires",
-        _dbCache.get(cacheKey).expiresAt.toISOString(),
-      );
+      setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
+      res.setHeader("X-Cache", "HIT");
       return res.json(cached);
     }
 
@@ -311,22 +273,12 @@ router.get("/alerts", async (req, res, next) => {
 
     const payload = { months: MONTHS_12, alerts };
     dbCacheSet(cacheKey, payload);
-    res.set("X-Cache", "MISS");
-    res.set("X-Cache-Expires", _dbCache.get(cacheKey).expiresAt.toISOString());
+    setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
+    res.setHeader("X-Cache", "MISS");
     res.json(payload);
   } catch (err) {
     next(err);
   }
-});
-
-// ── POST /api/operations/latam/refresh-cache ──────────────────────────────────
-// Call after uploading new LATAM Excel files. Add auth middleware as needed.
-router.post("/latam/refresh-cache", (req, res) => {
-  clearLatamCache();
-  res.json({
-    ok: true,
-    message: "LATAM Excel cache cleared. Next request will re-read files.",
-  });
 });
 
 // ── GET /api/operations/cache-status ─────────────────────────────────────────

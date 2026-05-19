@@ -1,107 +1,72 @@
-# App Integration Scorecard — Backend
+# Scorecard Backend
 
-Express.js backend serving the App Integration Scorecard dashboard.
+Express + Node.js backend for the App Integration Scorecard dashboard.
 
----
-
-## Stack
-
-- **Node.js** + **Express** (ESM modules)
-- **Databricks** SQL REST API — live data for NA, EUROPE, AMESA sectors
-- **SheetJS (xlsx)** — static Excel files for LATAM sector
-
----
-
-## Project Structure
-
-```
-backend/
-├── data/
-│   └── latam/                        # LATAM Excel files (manual upload)
-│       ├── incidents_LATAM.xlsx
-│       ├── incidents_LATAM_1.xlsx
-│       ├── alerts_LATAM.xlsx
-│       └── problems_LATAM.xlsx
-├── src/
-│   ├── constants/
-│   │   └── TableNames.js             # Databricks table name constants
-│   ├── routes/
-│   │   └── operations.js             # /api/operations/* endpoints
-│   ├── services/
-│   │   ├── databricks.js             # Databricks SQL query service
-│   │   └── latamExcel.js             # LATAM Excel parser + cache
-│   └── utils/
-│       └── cacheSchedule.js          # Databricks refresh schedule logic
-└── package.json
-```
-
----
-
-## Setup
+## Quick Start (Local Dev)
 
 ```bash
 npm install
+cp .env.example .env
+# Fill in your Databricks credentials in .env
+npm start         # production mode
+# or
+npm run dev       # development mode with --watch (auto-restart)
 ```
 
-Create a `.env` file:
+Backend runs at **http://localhost:5000**
 
-```env
-DATABRICKS_HOST=
-DATABRICKS_TOKEN=
-DATABRICKS_HTTP_PATH=
+## Environment Variables
 
-```
-
----
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABRICKS_HOST` | ✅ | e.g. `adb-xxx.azuredatabricks.net` |
+| `DATABRICKS_HTTP_PATH` | ✅ | SQL warehouse HTTP path |
+| `DATABRICKS_TOKEN` | ✅ | Personal access token |
+| `PORT` | — | Default: `5000` |
+| `FRONTEND_ORIGIN` | Prod | Comma-separated allowed FE URLs |
+| `API_SECRET_KEY` | Prod | Shared secret with FE (`x-api-key` header) |
+| `NODE_ENV` | Prod | Set to `production` |
+| `CACHE_BUFFER_MINUTES` | — | Default: `5` |
+| `DATABRICKS_TZ_OFFSET_HOURS` | — | Default: `-6` (CST) |
+| `LATAM_EXCEL_DIR` | — | Override path to LATAM Excel files |
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/operations/incidents?sector=NA` | Incident counts (12 months) |
-| GET | `/api/operations/alerts?sector=NA` | Alert counts (12 months) |
-| GET | `/api/operations/problems?sector=NA` | Problem counts (12 months) |
-| GET | `/api/operations/cache-status` | Cache state + next refresh times |
-| POST | `/api/operations/latam/refresh-cache` | Hot-reload LATAM Excel files |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check + config info |
+| GET | `/api/operations/incidents?sector=NA` | Incident counts by month |
+| GET | `/api/operations/problems?sector=NA` | Problem counts by month |
+| GET | `/api/operations/alerts?sector=NA` | Alert counts by month |
+| GET | `/api/operations/cache-status` | Cache diagnostics |
+| POST | `/api/operations/latam/refresh-cache` | Clear LATAM Excel cache |
 
-**Sector values:** `NA` `EUROPE` `AMESA` `LATAM`
+**Sector values:** `NA`, `EUROPE`, `AMESA`, `LATAM`
 
----
+## Azure App Service Deployment
 
-## Caching
+1. Create an Azure App Service (Node 18+ LTS, Linux)
+2. Set all required env vars under **Settings → Configuration → Application Settings**
+3. Set `WEBSITE_RUN_FROM_PACKAGE=1` if deploying as a zip
+4. Set `SCM_DO_BUILD_DURING_DEPLOYMENT=true` for `npm install` on deploy
+5. Set `FRONTEND_ORIGIN` to your Azure Static Web Apps URL
+6. Set `API_SECRET_KEY` to a strong random string (same value in FE settings)
 
-### Databricks sectors (NA, EUROPE, AMESA)
-Cache expires aligned to the Databricks refresh schedule:
+### LATAM Excel Files on Azure
 
-| CST | UTC |
-|-----|-----|
-| 5:10 AM | 11:10 UTC |
-| 1:10 PM | 19:10 UTC |
-| 9:10 PM | 03:10 UTC |
+Option A — **Persistent storage (recommended)**:
+- Mount an Azure File Share to `/home/data/latam`
+- Set `LATAM_EXCEL_DIR=/home/data/latam`
 
-A 5-minute buffer is added after each window before re-querying. All expiry math is done in UTC so it is unaffected by server or user timezone.
+Option B — **Azure Blob + download on startup**:
+- Upload files to Blob Storage
+- Download them at startup in a custom script
 
-### LATAM (Excel)
-Cached permanently in-process — no TTL. Re-reads files only on:
-- Server restart
-- `POST /api/operations/latam/refresh-cache`
+### Cache on Azure
 
----
-
-## Updating LATAM Data
-
-1. Replace the relevant file(s) in `backend/data/latam/`
-2. Call `POST /api/operations/latam/refresh-cache`
-3. No server restart needed
-
----
-
-## Diagnostics
-
-Check cache state and next refresh windows:
-```
-GET /api/operations/cache-status
-```
-
-Response includes expiry times in UTC, IST, and CST.
-# app-dev-dashboard-service
+The backend uses an **in-process cache** (JavaScript `Map`). On Azure App Service:
+- Each instance has its own independent cache — this is fine
+- Cache misses simply re-query Databricks
+- All instances compute the same expiry time (schedule-aligned UTC)
+- For cross-instance cache sharing, integrate Azure Cache for Redis and
+  replace the `_dbCache` Map in `src/routes/operations.js`

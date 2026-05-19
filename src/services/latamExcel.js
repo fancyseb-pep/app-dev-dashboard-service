@@ -13,6 +13,7 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
+import fs from "fs";
 
 // createRequire is the correct way to load CJS packages (like xlsx) from ESM.
 // Make sure `npm install xlsx` has been run in the backend directory first.
@@ -77,13 +78,26 @@ const MONTHS_12 = generateLastNMonthLabels(12);
 // ── Excel reader ──────────────────────────────────────────────────────────────
 function readRows(filePaths) {
   const all = [];
+  let anyRead = false;
   for (const filePath of filePaths) {
-    console.log("[latamExcel] Reading:", filePath);
-    const wb = XLSX.readFile(filePath, { cellDates: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
-    console.log(`[latamExcel] ${path.basename(filePath)} → ${rows.length} rows`);
-    all.push(...rows);
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[latamExcel] File missing, skipping: ${filePath}`);
+      continue;
+    }
+    try {
+      console.log("[latamExcel] Reading:", filePath);
+      const wb = XLSX.readFile(filePath, { cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
+      console.log(`[latamExcel] ${path.basename(filePath)} → ${rows.length} rows`);
+      all.push(...rows);
+      anyRead = true;
+    } catch (e) {
+      console.warn(`[latamExcel] Failed to read ${filePath}: ${e.message || e}`);
+    }
+  }
+  if (!anyRead) {
+    throw new Error(`LATAM Excel: no files found in ${EXCEL_DIR}. Check LATAM_EXCEL_DIR and mounted file share.`);
   }
   return all;
 }
