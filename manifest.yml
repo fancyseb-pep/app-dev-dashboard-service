@@ -1,0 +1,6 @@
+applications:
+  - name: app-integration-dashboard-service
+    memory: 512M
+    instances: 1
+    buildpack: nodejs_buildpack
+    command: node src/index.js

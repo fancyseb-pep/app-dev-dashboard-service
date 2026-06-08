@@ -152,7 +152,6 @@ router.get("/incidents", async (req, res, next) => {
       GROUP BY 1, 2
       ORDER BY 1, 2
     `;
-console.log(">>>> incidents sql", sql)
     const rows = await queryDatabricks(sql);
     const countMap = {};
     for (const row of rows) {

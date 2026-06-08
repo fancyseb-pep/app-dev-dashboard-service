@@ -18,15 +18,18 @@ export function validateEnv() {
     );
   }
 
-  // In production, certain vars are required for safe operation.
   if (process.env.NODE_ENV === "production") {
-    const requiredInProd = ["FRONTEND_ORIGIN", "API_SECRET_KEY"];
+    const requiredInProd = ["FRONTEND_ORIGIN"];
     const missingProd = requiredInProd.filter((k) => !process.env[k]);
     if (missingProd.length) {
       throw new Error(
         `[env] Missing required production environment variables: ${missingProd.join(", ")}. ` +
-          `Set these in your App Service configuration.`
+          `Set these in your App Service / CF configuration.`
       );
+    }
+
+    if (!process.env.API_SECRET_KEY) {
+      console.warn("[env] WARNING: API_SECRET_KEY not set — API will run without x-api-key protection.");
     }
   }
 

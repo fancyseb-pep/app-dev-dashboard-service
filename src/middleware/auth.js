@@ -1,20 +1,17 @@
 // src/middleware/auth.js
-// Simple API key guard for all /api/* routes.
-// The frontend sends this key in the x-api-key header.
-// Set API_SECRET_KEY in .env — if not set, auth is skipped
-// in development so local dev works without config overhead.
 
 import crypto from "crypto";
 
 export function auth(req, res, next) {
   const secret = process.env.API_SECRET_KEY;
 
-  // If no secret is configured and we're not in production, allow all requests (dev mode)
-  if (!secret && process.env.NODE_ENV !== "production") return next();
-
-  // In production, secret MUST be set (enforced at startup). If missing for any
-  // reason, deny access.
-  if (!secret) return res.status(401).json({ error: "Unauthorized" });
+ 
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[auth] WARNING: API_SECRET_KEY not set — API is running without x-api-key protection.");
+    }
+    return next();
+  }
 
   const key = req.headers["x-api-key"] || "";
   try {
