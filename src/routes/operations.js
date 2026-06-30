@@ -45,23 +45,19 @@ const SECTOR_GRP_MAP = {
 // Instead of a fixed TTL (e.g. 1 hour), each cache entry expires at the next
 // Databricks refresh window + buffer (see cacheSchedule.js).
 //
-// Example timeline (UTC):
-//   10:45 UTC  — user requests NA incidents → cache MISS, query Databricks,
-//                store result, set expiresAt = 11:15 UTC (11:10 + 5 min buffer)
-//   10:55 UTC  — another user requests NA incidents → cache HIT (expires 11:15)
-//   11:20 UTC  — Databricks has refreshed; cache entry is now expired
-//                → next request is a MISS, fetches fresh data, new expiresAt
-//                  is set to 19:15 UTC (next window)
-//
-// This means data is never older than one Databricks cycle, regardless of
-// how many users access the app or from which timezone they do so.
+// Single CF instance — this in-process Map is the shared cache for all requests
+// hitting this process. With instances: 1 in manifest.yml this works correctly.
 //
 const _dbCache = new Map(); // Map<key, { data, expiresAt: Date }>
 
 function dbCacheGet(key) {
   const entry = _dbCache.get(key);
-  if (!entry) return null;
-  if (new Date() > entry.expiresAt) {
+  if (!entry) {
+    console.log(`[cache] MISS key="${key}" (not found)`);
+    return null;
+  }
+  const now = new Date();
+  if (now > entry.expiresAt) {
     _dbCache.delete(key);
     return null;
   }
@@ -69,7 +65,20 @@ function dbCacheGet(key) {
 }
 
 function dbCacheSet(key, data) {
-  _dbCache.set(key, { data, expiresAt: getNextRefreshTime() });
+  const expiresAt = getNextRefreshTime();
+
+  // Guard: if getNextRefreshTime() somehow returned a past time, fall back to
+  // 1 hour from now so we don't create an entry that expires immediately.
+  const minExpiry = new Date(Date.now() + 60 * 60 * 1000);
+  const safeExpiry = expiresAt > new Date() ? expiresAt : minExpiry;
+
+  if (expiresAt <= new Date()) {
+    console.warn(
+      `[cache] WARNING: getNextRefreshTime() returned a past time (${expiresAt.toISOString()}). Using fallback expiry of 1h.`
+    );
+  }
+
+  _dbCache.set(key, { data, expiresAt: safeExpiry });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -80,6 +89,8 @@ function toMonthLabel(year, month) {
   return `${mon} ${yr}`;
 }
 
+// FIX: Generate fresh month labels per request instead of once at module load.
+// If the app runs across a month boundary the labels would go stale otherwise.
 function generateLastNMonthLabels(n = 12) {
   const labels = [];
   const now = new Date();
@@ -111,11 +122,8 @@ function buildInClause(values) {
   );
 }
 
-const MONTHS_12 = generateLastNMonthLabels(12);
-
 // ── Cache-Control headers ─────────────────────────────────────────────────────
 function setCacheHeaders(res, expiresAt) {
-  // Compute remaining TTL and surface Cache-Control + X-Cache-Expires
   const ms = expiresAt.getTime() - Date.now();
   const secs = Math.max(0, Math.floor(ms / 1000));
   res.setHeader("Cache-Control", `public, max-age=${secs}`);
@@ -128,7 +136,6 @@ router.get("/incidents", async (req, res, next) => {
     const { sector, grpNames, error } = resolveGrpNames(req.query.sector);
     if (error) return res.status(400).json({ error });
 
-    // Non-LATAM and LATAM → Databricks (schedule-aligned cache)
     const cacheKey = `incidents:${sector}`;
     const cached = dbCacheGet(cacheKey);
     if (cached) {
@@ -136,6 +143,9 @@ router.get("/incidents", async (req, res, next) => {
       res.setHeader("X-Cache", "HIT");
       return res.json(cached);
     }
+
+    // Generate fresh month labels for this request
+    const MONTHS_12 = generateLastNMonthLabels(12);
 
     const inClause = buildInClause(grpNames);
     const sql = `
@@ -152,7 +162,10 @@ router.get("/incidents", async (req, res, next) => {
       GROUP BY 1, 2
       ORDER BY 1, 2
     `;
+
+    console.log(`[db] Querying incidents for sector=${sector}`);
     const rows = await queryDatabricks(sql);
+
     const countMap = {};
     for (const row of rows) {
       const label = toMonthLabel(Number(row.yr), Number(row.mo));
@@ -168,8 +181,7 @@ router.get("/incidents", async (req, res, next) => {
     dbCacheSet(cacheKey, payload);
     setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
     res.setHeader("X-Cache", "MISS");
-    res.json(payload);
-    return;
+    return res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -189,6 +201,8 @@ router.get("/problems", async (req, res, next) => {
       return res.json(cached);
     }
 
+    const MONTHS_12 = generateLastNMonthLabels(12);
+
     const inClause = buildInClause(grpNames);
     const sql = `
       SELECT
@@ -206,7 +220,9 @@ router.get("/problems", async (req, res, next) => {
       ORDER BY 1, 2
     `;
 
+    console.log(`[db] Querying problems for sector=${sector}`);
     const rows = await queryDatabricks(sql);
+
     const countMap = {};
     for (const row of rows) {
       const label = toMonthLabel(Number(row.yr), Number(row.mo));
@@ -222,8 +238,7 @@ router.get("/problems", async (req, res, next) => {
     dbCacheSet(cacheKey, payload);
     setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
     res.setHeader("X-Cache", "MISS");
-    res.json(payload);
-    return;
+    return res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -243,6 +258,8 @@ router.get("/alerts", async (req, res, next) => {
       return res.json(cached);
     }
 
+    const MONTHS_12 = generateLastNMonthLabels(12);
+
     const inClause = buildInClause(grpNames);
     const sql = `
       SELECT
@@ -258,7 +275,9 @@ router.get("/alerts", async (req, res, next) => {
       ORDER BY 1, 2
     `;
 
+    console.log(`[db] Querying alerts for sector=${sector}`);
     const rows = await queryDatabricks(sql);
+
     const countMap = {};
     for (const row of rows) {
       const label = toMonthLabel(Number(row.yr), Number(row.mo));
@@ -274,7 +293,7 @@ router.get("/alerts", async (req, res, next) => {
     dbCacheSet(cacheKey, payload);
     setCacheHeaders(res, _dbCache.get(cacheKey).expiresAt);
     res.setHeader("X-Cache", "MISS");
-    res.json(payload);
+    return res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -285,15 +304,22 @@ router.get("/alerts", async (req, res, next) => {
 // Remove or auth-gate this in production if you don't want it public.
 router.get("/cache-status", (req, res) => {
   const schedule = getScheduleSummary();
+  const now = new Date();
   const entries = [..._dbCache.entries()].map(([key, entry]) => ({
     key,
     expires_utc: entry.expiresAt.toISOString(),
     expires_ist: entry.expiresAt.toLocaleString("en-IN", {
       timeZone: "Asia/Kolkata",
     }),
-    stale: new Date() > entry.expiresAt,
+    stale: now > entry.expiresAt,
+    ttl_seconds: Math.max(0, Math.floor((entry.expiresAt - now) / 1000)),
   }));
-  res.json({ schedule, cached_keys: entries });
+  res.json({
+    schedule,
+    cache_size: _dbCache.size,
+    server_time_utc: now.toISOString(),
+    cached_keys: entries,
+  });
 });
 
 export default router;
