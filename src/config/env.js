@@ -7,6 +7,7 @@ const REQUIRED = [
   "DATABRICKS_HOST",
   "DATABRICKS_HTTP_PATH",
   "DATABRICKS_TOKEN",
+  "GEMINI_API_KEY",
 ];
 
 export function validateEnv() {
