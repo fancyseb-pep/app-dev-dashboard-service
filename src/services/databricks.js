@@ -24,7 +24,6 @@ async function getSession() {
     });
 
     _session = await _client.openSession();
-    console.log("[databricks] Session opened");
     return _session;
   } catch (err) {
     console.error("[databricks] Failed to open session:", err.message || err);

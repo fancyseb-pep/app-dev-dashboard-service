@@ -32,7 +32,7 @@ app.use(
     },
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "x-api-key"],
-  })
+  }),
 );
 
 app.use(helmet());
@@ -45,7 +45,7 @@ app.get("/health", (_req, res) =>
     env: process.env.NODE_ENV || "development",
     databricksHost: process.env.DATABRICKS_HOST,
     allowedOrigins,
-  })
+  }),
 );
 
 // ── API routes ────────────────────────────────────────────────────────────────
@@ -56,33 +56,34 @@ app.use(errorHandler);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const server = app.listen(PORT, () => {
-  console.log(`[server] Backend running on http://localhost:${PORT}`);
-  console.log(`[server] NODE_ENV: ${process.env.NODE_ENV || "development"}`);
-  console.log(`[server] Databricks host: ${process.env.DATABRICKS_HOST}`);
-  console.log(`[server] Allowed CORS origins: ${allowedOrigins.join(", ")}`);
+  console.log(`[server] Backend running ....`);
+  if (process.env.NODE_ENV === "development") {
+    console.log(`[server] Databricks host: ${process.env.DATABRICKS_HOST}`);
+    console.log(`[server] Allowed CORS origins: ${allowedOrigins.join(", ")}`);
+  }
 });
 
 // Graceful shutdown — close HTTP server and Databricks session
 async function shutdown(signal) {
   console.log(`[server] Received ${signal}. Shutting down...`);
   try {
-    server.close(() => console.log('[server] HTTP server closed'));
+    server.close(() => console.log("[server] HTTP server closed"));
     await closeSession();
   } catch (e) {
-    console.error('[server] Error during shutdown:', e);
+    console.error("[server] Error during shutdown:", e);
   } finally {
     process.exit(0);
   }
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-process.on('unhandledRejection', (reason) => {
-  console.error('[server] Unhandled Rejection:', reason);
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] Unhandled Rejection:", reason);
 });
-process.on('uncaughtException', (err) => {
-  console.error('[server] Uncaught Exception:', err);
+process.on("uncaughtException", (err) => {
+  console.error("[server] Uncaught Exception:", err);
   // It's safer to exit; let the process manager restart the app
   process.exit(1);
 });
