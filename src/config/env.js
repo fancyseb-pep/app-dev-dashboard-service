@@ -27,10 +27,6 @@ export function validateEnv() {
           `Set these in your App Service / CF configuration.`
       );
     }
-
-    if (!process.env.API_SECRET_KEY) {
-      console.warn("[env] WARNING: API_SECRET_KEY not set — API will run without x-api-key protection.");
-    }
   }
 
   // Warn (don't crash) on other missing optional-but-recommended vars in non-prod

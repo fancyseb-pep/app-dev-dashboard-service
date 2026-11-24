@@ -24,7 +24,6 @@ Backend runs at **http://localhost:5000**
 | `DATABRICKS_TOKEN` | ✅ | Personal access token |
 | `PORT` | — | Default: `5000` |
 | `FRONTEND_ORIGIN` | Prod | Comma-separated allowed FE URLs |
-| `API_SECRET_KEY` | Prod | Shared secret with FE (`x-api-key` header) |
 | `NODE_ENV` | Prod | Set to `production` |
 | `CACHE_BUFFER_MINUTES` | — | Default: `5` |
 | `DATABRICKS_TZ_OFFSET_HOURS` | — | Default: `-6` (CST) |
